@@ -126,7 +126,18 @@ def coloured(line, start, end, css_at):
     return ''.join(pieces)
 
 
-def line_html(line, classes, marks):
+def preview_html(index, old_html, replacement):
+    """A match shown as Replace would change it: old struck through, new beside it.
+
+    Both marks carry the match index, so a tap on either selects the match.
+    """
+    new = ''
+    if replacement:
+        new = '<mark data-m="%d" class="new">%s</mark>' % (index, escape(replacement))
+    return '<mark data-m="%d" class="old">%s</mark>%s' % (index, old_html, new)
+
+
+def line_html(line, classes, marks, preview=None):
     """One source line in full: syntax colours, and each match in a <mark>.
 
     marks are (start column, end column, match index), in order. Each mark
@@ -143,7 +154,11 @@ def line_html(line, classes, marks):
         if start >= end:
             continue
         out.append(coloured(line, position, start, css_at))
-        out.append('<mark data-m="%d">%s</mark>' % (index, coloured(line, start, end, css_at)))
+        found = coloured(line, start, end, css_at)
+        if preview is not None and index in preview:      # {match index: replacement}
+            out.append(preview_html(index, found, preview[index]))
+        else:
+            out.append('<mark data-m="%d">%s</mark>' % (index, found))
         position = end
     out.append(coloured(line, position, len(line), css_at))
     return ''.join(out)
@@ -167,7 +182,7 @@ def line_blocks(hit_lines, line_count, context_lines):
     return blocks
 
 
-def results_html(text, matches, context_lines=0, note=''):
+def results_html(text, matches, context_lines=0, note='', preview=None):
     """HTML for the results: blocks of numbered lines with every match marked.
 
     matches are find_model Matches for text; their list positions are the
@@ -186,11 +201,11 @@ def results_html(text, matches, context_lines=0, note=''):
         out.append('<div class="block">')
         for number in range(first, last + 1):
             marks = marks_by_line.get(number, [])
-            code = line_html(lines[number - 1], classes.get(number, []), marks)
+            code = line_html(lines[number - 1], classes.get(number, []), marks, preview)
             if marks:
                 out.append('<div class="row hit" data-tap="%d">' % marks[0][2])
             else:
-                out.append('<div class="row">')
+                out.append('<div class="row ctx">')
             out.append('<span class="ln">%d</span><span class="code">%s</span></div>'
                        % (number, code))
         out.append('</div>')
@@ -268,11 +283,18 @@ html, body { margin: 0; padding: 0; background: %(background)s; color: %(text)s;
 .ln { flex: 0 0 40px; padding-right: 10px; text-align: right; color: %(muted)s;
     -webkit-user-select: none; }
 .code { white-space: pre; tab-size: 4; padding-right: 12px; }
-.row:not(.hit) .code, .row:not(.hit) .code span { color: %(muted)s; }
+.row.ctx .code, .row.ctx .code span { color: %(muted)s; }
+.sign { flex: 0 0 16px; color: %(muted)s; -webkit-user-select: none; }
+.row.add { background: rgba(98, 210, 111, 0.16); }
+.row.del { background: rgba(255, 90, 95, 0.16); }
+.row.add .sign { color: #62D26F; }
+.row.del .sign { color: #FF5A5F; }
 mark { background: %(accent)s; color: #111111; border-radius: 3px; padding: 1px 0;
     cursor: pointer; }
 mark span { color: #111111 !important; }
 mark.current { box-shadow: 0 0 0 2px %(text)s; }
+mark.old { background: #FF5A5F; text-decoration: line-through; }
+mark.new { background: #62D26F; margin-left: 2px; }
 .note { padding: 10px 4px; color: %(muted)s; font-family: -apple-system, sans-serif; }
 """ % values
     script = PAGE_SCRIPT % {'scheme': LINK_SCHEME}

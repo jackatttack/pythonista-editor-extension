@@ -10,8 +10,9 @@ import clipboard
 import ui
 
 from .. import editor_bridge as bridge
-from .. import keyboard
+from .. import diff_model, keyboard
 from ..style import BOLD, COLOURS
+from .diff_sheet import DiffSheet
 from .rename_sheet import RenameSheet
 from .tiles import TILE_GAP, TILE_HEIGHT, Tool, ToolTile
 
@@ -44,6 +45,8 @@ class QuickPage(ui.View):
     def __init__(self, deck):
         self.deck = deck
         self.rename_sheet = None
+        self.diff_sheet = None
+        self.pending_replace = None    # (path, old text, new text) while the diff shows
         self.sections = []      # (heading label, [tiles])
         self.tiles = []
 
@@ -91,9 +94,11 @@ class QuickPage(ui.View):
         ])
         self.add_section('CLIPBOARD', [
             Tool('📥', 'Replace',
-                 "Replaces the entire open script with the clipboard's text, then "
-                 'shows you the editor. Use it to drop in a whole new version from a '
-                 'chat.', self.replace_with_clipboard, tint=COLOURS['warn']),
+                 'Shows what would change first: the clipboard compared with the open '
+                 'script, removed lines in red and added lines in green. Tap Replace on '
+                 'that sheet to swap the whole script for the clipboard and show the '
+                 'editor, or Cancel. Use it to drop in a whole new version from a chat.',
+                 self.replace_with_clipboard, tint=COLOURS['warn']),
             Tool('➕', 'Append',
                  "Adds the clipboard's text to the end of the open script, on a new "
                  'line, then shows you the editor.', self.append_clipboard),
@@ -230,9 +235,49 @@ class QuickPage(ui.View):
 
     # --- Clipboard ------------------------------------------------------------
     def replace_with_clipboard(self):
-        if bridge.replace_active_text(clipboard.get() or ''):
+        """First tap of Replace: show what would change, in a DiffSheet.
+
+        Replace on the sheet is the second tap (apply_clipboard_replace). The
+        texts are kept as shown, so the second tap applies exactly that.
+        """
+        path = bridge.active_path()
+        if not path:
+            bridge.hud('No open script', 'error')
+            return
+        if self.diff_sheet is not None:
+            return
+        new_text = clipboard.get() or ''
+        old_text = bridge.active_text()
+        if not new_text.strip():
+            bridge.hud('Clipboard is empty', 'error')    # Clear blanks a script on purpose
+            return
+        if new_text == old_text:
+            bridge.hud('Clipboard matches the script')
+            return
+        diff = diff_model.line_diff(old_text, new_text)
+        self.pending_replace = (path, old_text, new_text)
+        self.diff_sheet = DiffSheet(diff_model.diff_html(diff, old_text, new_text),
+                                    diff_model.summary(diff),
+                                    self.apply_clipboard_replace, self.close_diff)
+        self.diff_sheet.frame = (0, 0, self.width, self.height)
+        self.add_subview(self.diff_sheet)
+
+    def apply_clipboard_replace(self):
+        """Second tap: replace the script with the text the sheet showed."""
+        path, old_text, new_text = self.pending_replace
+        self.close_diff()
+        if bridge.active_path() != path or bridge.active_text() != old_text:
+            bridge.hud('Script changed; tap Replace again', 'error', 1.2)
+            return
+        if bridge.replace_active_text(new_text):
             bridge.hud('Script replaced')
             self.done(reveal=True)
+
+    def close_diff(self):
+        sheet, self.diff_sheet = self.diff_sheet, None
+        self.pending_replace = None
+        if sheet is not None:
+            self.remove_subview(sheet)
 
     def append_clipboard(self):
         if not bridge.active_path():

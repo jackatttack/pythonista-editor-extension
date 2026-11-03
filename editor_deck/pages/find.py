@@ -3,9 +3,12 @@
 Type in Find and every line with a match is shown below in full, indentation
 included, syntax coloured, with each match marked. It updates as you type
 and when the script changes. The ± chip adds lines of context above and
-below each match. Next steps through the matches and Replace swaps the
-outlined one, both without leaving the deck. Replace All swaps every match
-and shows you the editor; tapping a match jumps to it in the editor.
+below each match. Next steps through the matches.
+
+Replace and Replace All take two taps. The first shows the change in
+place (old text struck through in red, new text in green) and turns the
+button into Confirm; the second makes it. Typing, Next, tapping a match,
+the toggles or a change to the script cancel the preview.
 
 The searching is pure (find_model.py) and so is the results HTML
 (find_html.py). This page shows the results in a WebView, which runs its
@@ -29,6 +32,8 @@ REFRESH_SECONDS = 1.0     # how often matches are re-checked against the script
 MAX_SHOWN_MATCHES = 200   # matches drawn in the results; the count still covers them all
 CONTEXT_STEPS = (0, 2, 5) # lines shown above and below each match; the ± chip cycles them
 
+REPLACE_TITLES = {'one': ('Replace', 'Confirm'), 'all': ('Replace All', 'Confirm All')}
+
 HELP = {
     'find_paste': ('📋  Paste into Find', "Fills the Find box with the clipboard's text."),
     'replace_paste': ('📋  Paste into Replace',
@@ -41,11 +46,14 @@ HELP = {
                 '0, 2 or 5. Tap to cycle. Nearby matches share one block.'),
     'next': ('Next ▸', 'Selects the next match in the script and outlines it below, '
              'without leaving the deck. Wraps round to the first match at the end.'),
-    'replace': ('Replace', 'Replaces the outlined match (or the first one) with the Replace '
-                'text and shows you the change in the editor. Back in the deck, the next '
-                'match is outlined, ready for the next Replace.'),
-    'replace_all': ('Replace All', 'Replaces every match in the script at once, then shows '
-                    'you the editor. The Replace text is used exactly as typed.'),
+    'replace': ('Replace', 'First tap shows the outlined match (or the first one) changed '
+                'in place: the old text struck through in red, the new text in green, and '
+                'the button becomes Confirm. Tap Confirm to make the change; the next match '
+                'is then outlined, ready for the next Replace. Typing or Next cancels.'),
+    'replace_all': ('Replace All', 'First tap shows every match changed in place, old in '
+                    'red and new in green, and the button becomes Confirm All. Tap it to '
+                    'make every change at once and show the editor. The Replace text is '
+                    'used exactly as typed.'),
     'row': ('Matches', 'Each line with a match is shown in full, indentation included, with '
             'every match marked. Tap a mark to select that match in the editor, or '
             'elsewhere on the line for its first match. Long lines scroll sideways.'),
@@ -62,6 +70,8 @@ class FindPage(ui.View):
         self.text = ''             # the script text the matches were found in
         self.matches = []
         self.current = -1
+        self.armed = None          # 'one' or 'all' while a Replace preview shows
+        self.armed_index = -1      # the match a 'one' preview is for
         self.buttons = []          # every button, for the help-mode look
         self.dirty = True          # matches need recomputing on the next tick
         self.last_key = None
@@ -163,6 +173,7 @@ class FindPage(ui.View):
         action()
 
     def set_help_mode(self, on):
+        self.disarm()
         for button in self.buttons:
             button.border_color = COLOURS['accent'] if on else COLOURS['border']
         if not on:
@@ -177,6 +188,7 @@ class FindPage(ui.View):
 
     # --- Keeping the matches current ------------------------------------------
     def textfield_did_change(self, textfield):
+        self.disarm()
         self.dirty = True
 
     def textfield_should_return(self, textfield):
@@ -197,6 +209,7 @@ class FindPage(ui.View):
             self.show_matches(text)
 
     def show_matches(self, text):
+        self.disarm(redraw=False)   # the preview was for the old matches
         self.text = text
         query = self.find_field.text or ''
         self.matches = find_model.find_matches(text, query, self.match_case, self.whole_word)
@@ -214,7 +227,7 @@ class FindPage(ui.View):
         self.show_results()
 
     def show_results(self):
-        """Redraw the results page from the current matches."""
+        """Redraw the results page from the current matches and any preview."""
         if not (self.find_field.text or ''):
             body = find_html.message_html('Type above to find in the script.')
         elif not self.matches:
@@ -224,9 +237,18 @@ class FindPage(ui.View):
             note = ''
             if len(self.matches) > MAX_SHOWN_MATCHES:
                 note = 'Showing the first %d matches.' % MAX_SHOWN_MATCHES
-            body = find_html.results_html(self.text, shown,
-                                          CONTEXT_STEPS[self.context_step], note)
+            body = find_html.results_html(self.text, shown, CONTEXT_STEPS[self.context_step],
+                                          note, self.preview_for(len(shown)))
         self.run_script('showResults(%s, %d)' % (json.dumps(body), self.shown_current()))
+
+    def preview_for(self, shown_count):
+        """{match index: replacement} for the armed Replace, or None."""
+        replacement = self.replace_field.text or ''
+        if self.armed == 'one':
+            return {self.armed_index: replacement}
+        if self.armed == 'all':
+            return dict.fromkeys(range(shown_count), replacement)
+        return None
 
     def shown_current(self):
         """The outlined match's index on the page, or -1 if it is not drawn."""
@@ -240,6 +262,34 @@ class FindPage(ui.View):
         self.last_key = None
         self.dirty = True
         self.tick(self.next_refresh)
+
+    # --- Two-tap Replace ------------------------------------------------------
+    def arm(self, kind, index):
+        """First tap: show the change in place and turn the button into Confirm."""
+        self.disarm(redraw=False)
+        self.armed = kind
+        self.armed_index = index
+        self.current = index
+        button = self.replace_button if kind == 'one' else self.replace_all_button
+        button.title = REPLACE_TITLES[kind][1]
+        button.tint_color = COLOURS['warn']
+        button.border_color = COLOURS['warn']
+        self.layout()             # keep the button's frame after the title change
+        self.show_results()
+
+    def disarm(self, redraw=True):
+        """Cancel any Replace preview and put the buttons back."""
+        if self.armed is None:
+            return
+        self.armed = None
+        self.armed_index = -1
+        for kind, button in (('one', self.replace_button), ('all', self.replace_all_button)):
+            button.title = REPLACE_TITLES[kind][0]
+            button.tint_color = COLOURS['text']
+            button.border_color = COLOURS['border']
+        self.layout()
+        if redraw:
+            self.show_results()
 
     # --- The results page -----------------------------------------------------
     def run_script(self, script):
@@ -278,6 +328,7 @@ class FindPage(ui.View):
         return '±%d' % CONTEXT_STEPS[self.context_step]
 
     def cycle_context(self):
+        self.disarm(redraw=False)
         self.context_step = (self.context_step + 1) % len(CONTEXT_STEPS)
         self.context_chip.title = self.context_title()
         self.layout()             # keep the chip's frame after the title change
@@ -285,18 +336,22 @@ class FindPage(ui.View):
         self.show_results()
 
     def paste_into_find(self):
+        self.disarm()
         self.find_field.text = clipboard.get() or ''
         self.dirty = True
 
     def paste_into_replace(self):
+        self.disarm()
         self.replace_field.text = clipboard.get() or ''
 
     def toggle_case(self):
+        self.disarm()
         self.match_case = not self.match_case
         self.show_toggle_states()
         self.dirty = True
 
     def toggle_word(self):
+        self.disarm()
         self.whole_word = not self.whole_word
         self.show_toggle_states()
         self.dirty = True
@@ -306,6 +361,7 @@ class FindPage(ui.View):
         if self.deck.help_mode:
             self.deck.show_help(*HELP['row'])
             return
+        self.disarm()
         self.current = index
         self.outline_current()
         match = self.matches[index]
@@ -315,16 +371,39 @@ class FindPage(ui.View):
         if not self.matches:
             bridge.hud('No matches', 'error')
             return
+        self.disarm()
         self.current = (self.current + 1) % len(self.matches)
         self.outline_current()
         match = self.matches[self.current]
         bridge.select_range(match.start, match.end)
 
     def replace_current(self):
+        """Replace: preview the outlined match's change, then Confirm makes it."""
         if not self.matches:
             bridge.hud('No matches', 'error')
             return
         index = self.current if 0 <= self.current < len(self.matches) else 0
+        if self.armed == 'one' and self.armed_index == index:
+            self.disarm(redraw=False)
+            self.apply_replace(index)
+        else:
+            self.arm('one', index)
+
+    def replace_all(self):
+        """Replace All: preview every change, then Confirm All makes them."""
+        if not (self.find_field.text or ''):
+            bridge.hud('Type something to find', 'error')
+            return
+        if not self.matches:
+            bridge.hud('No matches', 'error')
+            return
+        if self.armed == 'all':
+            self.disarm(redraw=False)
+            self.apply_replace_all()
+        else:
+            self.arm('all', 0)
+
+    def apply_replace(self, index):
         match = self.matches[index]
         query = self.find_field.text or ''
         text = bridge.active_text()
@@ -349,11 +428,8 @@ class FindPage(ui.View):
         bridge.select_range(match.start, match.start + len(replacement), reveal=True)
         bridge.hud('Replaced 1')
 
-    def replace_all(self):
+    def apply_replace_all(self):
         query = self.find_field.text or ''
-        if not query:
-            bridge.hud('Type something to find', 'error')
-            return
         text = bridge.active_text()
         new_text, count = find_model.replace_all(text, query, self.replace_field.text or '',
                                                  self.match_case, self.whole_word)

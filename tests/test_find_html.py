@@ -54,6 +54,15 @@ check('escaped around a mark', '&lt;<mark data-m="0">tag</mark>&gt;' in page)
 matches, page = render('def broken(:\n    x = "unterminated\n', 'x')
 check('broken source still marked', '<mark data-m="0">x</mark>' in page)
 
+# Replace preview: old struck, new beside it, both carrying the match index.
+matches = find_model.find_matches('x = old\n', 'old')
+page = find_html.results_html('x = old\n', matches, 0, preview={0: 'new'})
+check('preview marks old and new',
+      '<mark data-m="0" class="old">old</mark><mark data-m="0" class="new">new</mark>' in page)
+page = find_html.results_html('x = old\n', matches, 0, preview={0: ''})
+check('preview of a deletion has no new mark', 'class="old"' in page and 'class="new"' not in page)
+page = find_html.results_html('x = old\n', matches, 0, preview={0: '<b>'})
+check('preview text is escaped', 'class="new">&lt;b&gt;</mark>' in page)
 shell = find_html.page_html({'card': '#1b1e27', 'text': 'white', 'muted': (0.5, 0.5, 0.5),
                              'accent': '#ff4fa3'})
 check('page shell has the link scheme and script',

@@ -31,15 +31,20 @@ one tap away from whatever you are editing. (This is a manual step.)
 
 **Quick** — two-column tools for the open script:
 copy the script, its path, or a `pythonista3://` run or open link; a fresh
-scratch pad beside it; rename; duplicate; replace or append from the
-clipboard; clear and delete (each needs a second tap). Tools that change or
+scratch pad beside it; rename; duplicate; replace the script with the
+clipboard (a diff of what would change shows first, and Replace on it
+confirms) or append the clipboard; clear and delete (each needs a second
+tap). Tools that change or
 open a script slide the console away, so you land on the result.
 
 **Find** — type and every matching line appears in full, live: indentation
 kept, syntax coloured, each match marked, and the current match boxed so you
 can see what Next and Replace will act on. The ± chip adds 0, 2 or 5 lines
 of context around each match. Match case and whole word, Next, Replace and
-Replace All. Plain text: brackets and dots match literally and the
+Replace All. Replace takes two taps: the first shows the change in place,
+old text struck through in red and new text in green, and the button
+becomes Confirm; the second makes it. Replace All previews every match the
+same way. Plain text: brackets and dots match literally and the
 replacement goes in exactly as typed. Tap a match to jump to it; long lines
 scroll sideways.
 
