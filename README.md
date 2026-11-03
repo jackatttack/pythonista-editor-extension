@@ -35,10 +35,13 @@ scratch pad beside it; rename; duplicate; replace or append from the
 clipboard; clear and delete (each needs a second tap). Tools that change or
 open a script slide the console away, so you land on the result.
 
-**Find** — type to see every match with its line number, live. Match case
-and whole word, Next, Replace and Replace All. Plain text: brackets and dots
-match literally and the replacement goes in exactly as typed. Tap a match
-to jump to it.
+**Find** — type and every matching line appears in full, live: indentation
+kept, syntax coloured, each match marked, and the current match boxed so you
+can see what Next and Replace will act on. The ± chip adds 0, 2 or 5 lines
+of context around each match. Match case and whole word, Next, Replace and
+Replace All. Plain text: brackets and dots match literally and the
+replacement goes in exactly as typed. Tap a match to jump to it; long lines
+scroll sideways.
 
 **Constants** — tune the open script's top-level settings without hunting
 through the code. Every `UPPER_CASE` name set to a plain value gets a

@@ -1,30 +1,33 @@
 """Find page: find and replace in the open script.
 
-Type in Find and every match is listed below with its line number,
-updating as you type and when the script changes. Next steps through the
-matches and Replace swaps the outlined one, both without leaving the deck.
-Replace All swaps every match and shows you the editor; tapping a row
-jumps to that match in the editor.
+Type in Find and every line with a match is shown below in full, indentation
+included, syntax coloured, with each match marked. It updates as you type
+and when the script changes. The ± chip adds lines of context above and
+below each match. Next steps through the matches and Replace swaps the
+outlined one, both without leaving the deck. Replace All swaps every match
+and shows you the editor; tapping a match jumps to it in the editor.
 
-The searching is pure (find_model.py); this page shows it and talks to
-the editor through editor_bridge.
+The searching is pure (find_model.py) and so is the results HTML
+(find_html.py). This page shows the results in a WebView, which runs its
+JavaScript queued until the page has loaded (the Math deck's pattern), and
+talks to the editor through editor_bridge.
 """
+import json
+
 import clipboard
 import ui
 
 from .. import editor_bridge as bridge
-from .. import find_model, keyboard
+from .. import find_html, find_model, keyboard
 from ..style import BOLD, COLOURS, FONT
 
 FIELD_HEIGHT = 36
 BUTTON_HEIGHT = 36
 CHIP_HEIGHT = 30
-ROW_HEIGHT = 34
-ROW_GAP = 2
 GAP = 8
 REFRESH_SECONDS = 1.0     # how often matches are re-checked against the script
-MAX_LIST_ROWS = 200
-SNIPPET_LEAD = 18         # characters of the line shown before a match
+MAX_SHOWN_MATCHES = 200   # matches drawn in the results; the count still covers them all
+CONTEXT_STEPS = (0, 2, 5) # lines shown above and below each match; the ± chip cycles them
 
 HELP = {
     'find_paste': ('📋  Paste into Find', "Fills the Find box with the clipboard's text."),
@@ -34,56 +37,19 @@ HELP = {
              'Off by default.'),
     'word': ('Word  Whole word', 'When on, only whole words match: "cat" will not find the '
              '"cat" inside "concatenate". Off by default.'),
-    'next': ('Next ▸', 'Selects the next match in the script and outlines it in the list, '
+    'context': ('±  Context lines', 'How many lines to show above and below each match: '
+                '0, 2 or 5. Tap to cycle. Nearby matches share one block.'),
+    'next': ('Next ▸', 'Selects the next match in the script and outlines it below, '
              'without leaving the deck. Wraps round to the first match at the end.'),
     'replace': ('Replace', 'Replaces the outlined match (or the first one) with the Replace '
                 'text and shows you the change in the editor. Back in the deck, the next '
                 'match is outlined, ready for the next Replace.'),
     'replace_all': ('Replace All', 'Replaces every match in the script at once, then shows '
                     'you the editor. The Replace text is used exactly as typed.'),
-    'row': ('Matches', 'Each row is one match: its line number and the line around it. '
-            'Tap a row to select that match in the editor and show it.'),
+    'row': ('Matches', 'Each line with a match is shown in full, indentation included, with '
+            'every match marked. Tap a mark to select that match in the editor, or '
+            'elsewhere on the line for its first match. Long lines scroll sideways.'),
 }
-
-
-class MatchRow(ui.View):
-    """One match in the list: line number and a snippet of its line."""
-
-    def __init__(self, index, match, on_tap):
-        self.index = index
-        self.on_tap = on_tap
-        self.background_color = COLOURS['card']
-        self.corner_radius = 6
-        self.border_color = COLOURS['accent']
-        self.border_width = 0
-
-        self.line_label = ui.Label()
-        self.line_label.text = str(match.line_number)
-        self.line_label.font = (FONT, 11)
-        self.line_label.text_color = COLOURS['muted']
-        self.line_label.alignment = ui.ALIGN_RIGHT
-        self.add_subview(self.line_label)
-
-        self.text_label = ui.Label()
-        self.text_label.text = match.line_text[max(0, match.column - SNIPPET_LEAD):].strip()
-        self.text_label.font = (FONT, 12)
-        self.text_label.text_color = COLOURS['text']
-        self.add_subview(self.text_label)
-
-    def layout(self):
-        self.line_label.frame = (0, 0, 40, self.height)
-        self.text_label.frame = (50, 0, self.width - 56, self.height)
-
-    def set_current(self, on):
-        self.border_width = 1 if on else 0
-
-    def touch_began(self, touch):
-        keyboard.dismiss()
-
-    def touch_ended(self, touch):
-        x, y = touch.location
-        if 0 <= x <= self.width and 0 <= y <= self.height:
-            self.on_tap(self.index)
 
 
 class FindPage(ui.View):
@@ -92,13 +58,16 @@ class FindPage(ui.View):
         self.deck = deck
         self.match_case = False
         self.whole_word = False
+        self.context_step = 0      # index into CONTEXT_STEPS
+        self.text = ''             # the script text the matches were found in
         self.matches = []
         self.current = -1
-        self.rows = []
         self.buttons = []          # every button, for the help-mode look
         self.dirty = True          # matches need recomputing on the next tick
         self.last_key = None
         self.next_refresh = 0.0
+        self.scripts = []          # JavaScript waiting for the results page to load
+        self.web_ready = False
 
         self.find_field = self.make_field('Find')
         self.replace_field = self.make_field('Replace with')
@@ -106,6 +75,7 @@ class FindPage(ui.View):
         self.replace_paste = self.make_button('📋', 'replace_paste', self.paste_into_replace)
         self.case_chip = self.make_button('Aa', 'case', self.toggle_case)
         self.word_chip = self.make_button('Word', 'word', self.toggle_word)
+        self.context_chip = self.make_button(self.context_title(), 'context', self.cycle_context)
 
         self.count_label = ui.Label()
         self.count_label.font = (FONT, 12)
@@ -117,12 +87,13 @@ class FindPage(ui.View):
         self.replace_button = self.make_button('Replace', 'replace', self.replace_current)
         self.replace_all_button = self.make_button('Replace All', 'replace_all', self.replace_all)
 
-        self.list_scroll = ui.ScrollView()
-        self.list_scroll.shows_vertical_indicator = True
-        self.list_delegate = keyboard.DismissOnDrag()
-        self.list_scroll.delegate = self.list_delegate
-        self.add_subview(self.list_scroll)
+        self.results = ui.WebView()
+        self.results.background_color = COLOURS.get('panel', COLOURS['card'])
+        self.results.scales_page_to_fit = False
+        self.results.delegate = self
+        self.add_subview(self.results)
         self.show_toggle_states()
+        self.results.load_html(find_html.page_html(COLOURS))
 
     # --- Building -------------------------------------------------------------
     def make_field(self, placeholder):
@@ -167,7 +138,8 @@ class FindPage(ui.View):
         y += FIELD_HEIGHT + GAP
         self.case_chip.frame = (0, y, 52, CHIP_HEIGHT)
         self.word_chip.frame = (60, y, 64, CHIP_HEIGHT)
-        self.count_label.frame = (132, y, width - 132, CHIP_HEIGHT)
+        self.context_chip.frame = (132, y, 48, CHIP_HEIGHT)
+        self.count_label.frame = (188, y, width - 188, CHIP_HEIGHT)
 
         y += CHIP_HEIGHT + GAP
         button_width = (width - 2 * GAP) / 3
@@ -176,8 +148,7 @@ class FindPage(ui.View):
             button.frame = (column * (button_width + GAP), y, button_width, BUTTON_HEIGHT)
 
         y += BUTTON_HEIGHT + GAP
-        self.list_scroll.frame = (0, y, width, max(self.height - y, 40))
-        self.place_rows()
+        self.results.frame = (0, y, width, max(self.height - y, 40))
 
     # --- Help mode ------------------------------------------------------------
     def touch_began(self, touch):
@@ -198,7 +169,9 @@ class FindPage(ui.View):
             self.show_toggle_states()
 
     def show_toggle_states(self):
-        for chip, on in ((self.case_chip, self.match_case), (self.word_chip, self.whole_word)):
+        for chip, on in ((self.case_chip, self.match_case),
+                         (self.word_chip, self.whole_word),
+                         (self.context_chip, CONTEXT_STEPS[self.context_step] > 0)):
             chip.tint_color = COLOURS['accent'] if on else COLOURS['muted']
             chip.border_color = COLOURS['accent'] if on else COLOURS['border']
 
@@ -224,6 +197,7 @@ class FindPage(ui.View):
             self.show_matches(text)
 
     def show_matches(self, text):
+        self.text = text
         query = self.find_field.text or ''
         self.matches = find_model.find_matches(text, query, self.match_case, self.whole_word)
         total = len(self.matches)
@@ -237,45 +211,29 @@ class FindPage(ui.View):
             self.count_label.text = 'No matches'
         else:
             self.count_label.text = '%d match%s' % (total, '' if total == 1 else 'es')
-        self.build_rows()
+        self.show_results()
 
-    def build_rows(self):
-        for row in self.rows:
-            self.list_scroll.remove_subview(row)
-        self.rows = [MatchRow(index, match, self.row_tapped)
-                     for index, match in enumerate(self.matches[:MAX_LIST_ROWS])]
-        for row in self.rows:
-            self.list_scroll.add_subview(row)
-        self.place_rows()
-        self.outline_current()
+    def show_results(self):
+        """Redraw the results page from the current matches."""
+        if not (self.find_field.text or ''):
+            body = find_html.message_html('Type above to find in the script.')
+        elif not self.matches:
+            body = find_html.message_html('No matches.')
+        else:
+            shown = self.matches[:MAX_SHOWN_MATCHES]
+            note = ''
+            if len(self.matches) > MAX_SHOWN_MATCHES:
+                note = 'Showing the first %d matches.' % MAX_SHOWN_MATCHES
+            body = find_html.results_html(self.text, shown,
+                                          CONTEXT_STEPS[self.context_step], note)
+        self.run_script('showResults(%s, %d)' % (json.dumps(body), self.shown_current()))
 
-    def place_rows(self):
-        width = self.list_scroll.width
-        y = 0
-        for row in self.rows:
-            row.frame = (0, y, width, ROW_HEIGHT)
-            y += ROW_HEIGHT + ROW_GAP
-        self.list_scroll.content_size = (width, y)
+    def shown_current(self):
+        """The outlined match's index on the page, or -1 if it is not drawn."""
+        return self.current if 0 <= self.current < MAX_SHOWN_MATCHES else -1
 
     def outline_current(self):
-        for row in self.rows:
-            row.set_current(row.index == self.current)
-        if 0 <= self.current < len(self.rows):
-            self.scroll_to_row(self.rows[self.current])
-
-    def scroll_to_row(self, row):
-        """Scroll the list just far enough to show row.
-        (Pythonista's ScrollView has no scroll_rect_to_visible.)"""
-        scroll = self.list_scroll
-        top = scroll.content_offset[1]
-        if row.y < top:
-            top = row.y
-        elif row.y + row.height > top + scroll.height:
-            top = row.y + row.height - scroll.height
-        else:
-            return
-        lowest = max(scroll.content_size[1] - scroll.height, 0)
-        scroll.content_offset = (0, min(max(top, 0), lowest))
+        self.run_script('setCurrent(%d)' % self.shown_current())
 
     def refresh_now(self):
         """Recompute from the script straight away (after an edit)."""
@@ -283,7 +241,49 @@ class FindPage(ui.View):
         self.dirty = True
         self.tick(self.next_refresh)
 
+    # --- The results page -----------------------------------------------------
+    def run_script(self, script):
+        """Run JavaScript on the results page, queued until it has loaded."""
+        self.scripts.append(script)
+        self.push_scripts()
+
+    def push_scripts(self):
+        if not self.web_ready:
+            return
+        scripts, self.scripts = self.scripts, []
+        for script in scripts:
+            try:
+                self.results.eval_js(script)
+            except Exception:
+                pass
+
+    def webview_did_finish_load(self, webview):
+        self.web_ready = True
+        self.push_scripts()
+
+    def webview_should_start_load(self, webview, url, nav_type):
+        """A tapped match arrives as a link; take it here instead of loading it."""
+        if not url.startswith(find_html.LINK_SCHEME):
+            return True
+        try:
+            index = int(url[len(find_html.LINK_SCHEME):])
+        except ValueError:
+            return False
+        if 0 <= index < len(self.matches):     # the page may be a tick behind
+            self.row_tapped(index)
+        return False
+
     # --- Actions --------------------------------------------------------------
+    def context_title(self):
+        return '±%d' % CONTEXT_STEPS[self.context_step]
+
+    def cycle_context(self):
+        self.context_step = (self.context_step + 1) % len(CONTEXT_STEPS)
+        self.context_chip.title = self.context_title()
+        self.layout()             # keep the chip's frame after the title change
+        self.show_toggle_states()
+        self.show_results()
+
     def paste_into_find(self):
         self.find_field.text = clipboard.get() or ''
         self.dirty = True
@@ -302,6 +302,7 @@ class FindPage(ui.View):
         self.dirty = True
 
     def row_tapped(self, index):
+        keyboard.dismiss()
         if self.deck.help_mode:
             self.deck.show_help(*HELP['row'])
             return
