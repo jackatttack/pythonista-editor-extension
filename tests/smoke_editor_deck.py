@@ -34,7 +34,7 @@ check('corner square follows an offset panel',
       geometry.corner_square_origin((20, 100, 200, 300), 48, 8), (20 + 200 - 56, 100 + 300 - 56))
 
 from editor_deck import shell, dock
-check('four pages', shell.PAGE_TITLES, ['Quick', 'Find', 'Constants', 'Snippets'])
+check('four pages', shell.PAGE_TITLES, ['Quick', 'Find', 'Outline', 'Snippets'])
 check('show_deck is callable', callable(shell.show_deck), True)
 check('deck tag is set', dock.DECK_VIEW_TAG > 0, True)
 

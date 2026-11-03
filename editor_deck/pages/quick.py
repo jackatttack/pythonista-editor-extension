@@ -17,7 +17,7 @@ from .rename_sheet import RenameSheet
 from .tiles import TILE_GAP, TILE_HEIGHT, Tool, ToolTile
 
 MINIMISE_AFTER_ACTION = False   # True: fold the deck away after each tool
-CONSTANTS_PAGE = 2              # index of the Constants tab
+
 COLUMNS = 2
 HEADING_HEIGHT = 22
 SECTION_GAP = 14
@@ -88,8 +88,9 @@ class QuickPage(ui.View):
                  'demo_copy_2.py), unsaved edits included, and opens the copy in a '
                  'new tab.', self.duplicate_script),
             Tool('🎛️', 'Constants',
-                 "Switches to the Constants page, where the script's top-level "
-                 'settings can be tuned with sliders, switches and colour pickers.',
+                 "Opens the Constants tuner over the deck, where the script's top-level "
+                 'settings can be tuned with sliders, switches and colour pickers. '
+                 'Done closes it.',
                  self.open_constants, tint=COLOURS['accent']),
         ])
         self.add_section('CLIPBOARD', [
@@ -231,7 +232,7 @@ class QuickPage(ui.View):
             self.done()
 
     def open_constants(self):
-        self.deck.select_page(CONSTANTS_PAGE)
+        self.deck.open_constants()
 
     # --- Clipboard ------------------------------------------------------------
     def replace_with_clipboard(self):

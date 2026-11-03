@@ -234,6 +234,9 @@ function showResults(html, current) {
     document.getElementById('results').innerHTML = html;
     setCurrent(current);
 }
+function setFontSize(px) {
+    document.body.style.fontSize = px + 'px';
+}
 function setCurrent(index) {
     var old = document.querySelectorAll('.current');
     for (var i = 0; i < old.length; i++) { old[i].classList.remove('current'); }
@@ -254,7 +257,7 @@ document.addEventListener('click', function (event) {
 """
 
 
-def page_html(colours):
+def page_html(colours, extra_css='', extra_script=''):
     """The results page, loaded once. colours is the deck's style.COLOURS.
 
     Plain CSS on purpose. On device (2026-11-03), position: sticky line
@@ -277,7 +280,7 @@ html, body { margin: 0; padding: 0; background: %(background)s; color: %(text)s;
     font: %(size)dpx Menlo, monospace; -webkit-text-size-adjust: none; }
 .block { background: %(card)s; border-radius: 6px; margin: 0 0 6px 0; padding: 4px 0;
     overflow-x: auto; }
-.row { display: flex; min-width: max-content; min-height: 20px; line-height: 20px; }
+.row { display: flex; min-width: max-content; min-height: 1.65em; line-height: 1.65em; }
 .row.hit { cursor: pointer; }
 .row.current { background: rgba(255, 255, 255, 0.08); box-shadow: inset 3px 0 0 %(accent)s; }
 .ln { flex: 0 0 40px; padding-right: 10px; text-align: right; color: %(muted)s;
@@ -297,8 +300,8 @@ mark.old { background: #FF5A5F; text-decoration: line-through; }
 mark.new { background: #62D26F; margin-left: 2px; }
 .note { padding: 10px 4px; color: %(muted)s; font-family: -apple-system, sans-serif; }
 """ % values
-    script = PAGE_SCRIPT % {'scheme': LINK_SCHEME}
+    script = PAGE_SCRIPT % {'scheme': LINK_SCHEME} + extra_script
     return ('<!doctype html><html><head><meta charset="utf-8">'
             '<meta name="viewport" content="width=device-width, initial-scale=1">'
-            '<style>%s\n%s</style></head><body><div id="results"></div>'
-            '<script>%s</script></body></html>' % (css, syntax_css, script))
+            '<style>%s\n%s\n%s</style></head><body><div id="results"></div>'
+            '<script>%s</script></body></html>' % (css, syntax_css, extra_css, script))

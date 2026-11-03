@@ -22,8 +22,9 @@ from objc_util import on_main_thread
 
 from . import dock, editor_bridge, fold_flourish, geometry, keyboard
 from .help_card import HelpCard
-from .pages.constants import ConstantsPage
+from .pages.constants_sheet import ConstantsSheet
 from .pages.find import FindPage
+from .pages.outline import OutlinePage
 from .pages.quick import QuickPage
 from .pages.snippets import SnippetsPage
 from .tab_strip import TabStrip
@@ -55,7 +56,7 @@ SQUARE_FADE_SECONDS = 0.12
 CLOCK_INTERVAL = 0.25        # set once on the panel, never changed
 FILE_CHECK_SECONDS = 1.0     # how often the header re-reads the open file
 
-PAGE_TITLES = ['Quick', 'Find', 'Constants', 'Snippets']
+PAGE_TITLES = ['Quick', 'Find', 'Outline', 'Snippets']
 
 
 def spaced(text):
@@ -92,7 +93,8 @@ class DeckSquare(ui.View):
 
 
 # --- Pages ------------------------------------------------------------------
-# The pages live in pages/: quick.py, find.py and constants.py.
+# The pages live in pages/: quick.py, find.py, outline.py and snippets.py.
+# Constants opens as a sheet over them (constants_sheet.py), from Quick.
 
 
 # --- The panel --------------------------------------------------------------
@@ -140,9 +142,12 @@ class DeckView(ui.View):
 
         self.body = ui.View()
         self.add_subview(self.body)
-        self.pages = [QuickPage(self), FindPage(self), ConstantsPage(self), SnippetsPage(self)]
+        self.pages = [QuickPage(self), FindPage(self), OutlinePage(self), SnippetsPage(self)]
         for page in self.pages:
             self.body.add_subview(page)
+        # Constants is a tool, not a tab: a sheet over the pages, opened from Quick.
+        self.constants_sheet = ConstantsSheet(self)
+        self.body.add_subview(self.constants_sheet)
 
         self.square.alpha = 0.0
         self.square.touch_enabled = False
@@ -215,7 +220,7 @@ class DeckView(ui.View):
         body_top = tabs_top + TABS_HEIGHT + 10
         body_bottom = square_y - 8
         self.body.frame = (pad, body_top, width - 2 * pad, max(body_bottom - body_top, 40))
-        for page in self.pages:
+        for page in self.page_views():
             page.frame = (0, 0, self.body.width, self.body.height)
         if self.help_card is not None:
             self.help_card.frame = self.body.frame
@@ -253,7 +258,7 @@ class DeckView(ui.View):
         if now >= self.next_file_check:
             self.next_file_check = now + FILE_CHECK_SECONDS
             self.show_open_file()
-        for page in self.pages:
+        for page in self.page_views():
             tick = getattr(page, 'tick', None)
             if tick is not None:
                 tick(now)
@@ -291,7 +296,7 @@ class DeckView(ui.View):
         self.help_mode = on
         self.help_button.background_color = COLOURS['accent'] if on else COLOURS['button']
         self.help_button.tint_color = COLOURS['panel'] if on else COLOURS['text']
-        for page in self.pages:
+        for page in self.page_views():
             set_mode = getattr(page, 'set_help_mode', None)
             if set_mode is not None:
                 set_mode(on)
@@ -317,10 +322,26 @@ class DeckView(ui.View):
 
     def select_page(self, index):
         index = min(max(int(index), 0), len(self.pages) - 1)
+        self.close_constants()
         self.tabs.selected_index = index
         for page_index, page in enumerate(self.pages):
             page.hidden = page_index != index
         dock.saved_state()['page'] = index
+
+    def page_views(self):
+        """Every view the clock and help mode reach: the tabs' pages, then the
+        Constants sheet (once it exists; layout can run before __init__ ends)."""
+        sheet = getattr(self, 'constants_sheet', None)
+        return self.pages + ([sheet] if sheet is not None else [])
+
+    def open_constants(self):
+        """Show the Constants tuner over the pages (Quick's Constants tile)."""
+        self.constants_sheet.open()
+
+    def close_constants(self):
+        sheet = getattr(self, 'constants_sheet', None)
+        if sheet is not None:
+            sheet.close()
 
     # --- Minimise -------------------------------------------------------------
     def minimise(self, sender=None, animated=True):

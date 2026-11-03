@@ -2,7 +2,8 @@
 
 A tool panel for Pythonista that lives in the console. Swipe across to the
 console and the deck is there, working on the script you have open: quick
-file tools, find and replace, a constants tuner and saved snippets, one tap
+file tools, find and replace, an outline of the script, a constants tuner and
+saved snippets, one tap
 each. For anyone writing Python on an iPhone or iPad who is tired of the
 long way round.
 
@@ -48,7 +49,15 @@ same way. Plain text: brackets and dots match literally and the
 replacement goes in exactly as typed. Tap a match to jump to it; long lines
 scroll sideways.
 
-**Constants** — tune the open script's top-level settings without hunting
+**Outline** — the open script as one row per class, function and method,
+nested as in the code, with top-level code (imports, settings) folded into
+rows of its own. Tap a row to open its code in place, syntax coloured with
+line numbers; tap ↗ to jump to it in the editor. Expand and Collapse open or
+fold everything, and A− / A+ change the text size. While the script does
+not parse, the outline comes from its def and class lines instead.
+
+**Constants** (Quick's Constants tile opens it as a sheet; Done closes it)
+— tune the open script's top-level settings without hunting
 through the code. Every `UPPER_CASE` name set to a plain value gets a
 control: a switch for True/False, a slider for numbers, a colour picker for
 `'#RRGGBB'` strings and a field for text. Lists, tuples and dicts of plain
