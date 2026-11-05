@@ -140,6 +140,11 @@ class DeckView(ui.View):
         self.tabs.action = self.tab_changed
         self.add_subview(self.tabs)
 
+        # The deck is always drawn dark. Under a light Pythonista theme UIKit
+        # used light defaults inside it (black unselected segment titles on
+        # the dark panel, reported by Ruud), so force dark for every subview.
+        self.objc_instance.setOverrideUserInterfaceStyle_(2)
+
         self.body = ui.View()
         self.add_subview(self.body)
         self.pages = [QuickPage(self), FindPage(self), OutlinePage(self), SnippetsPage(self)]
